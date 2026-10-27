@@ -43,23 +43,24 @@ export default function Home() {
   const [mobileNav, setMobileNav] = useState(false);
 
   useEffect(() => {
-    if (!supabase) { setAuthReady(true); return; }
+    const client = supabase;
+    if (!client) { setAuthReady(true); return; }
     let mounted = true;
     const loadProfile = async (sessionUser: User | null) => {
       if (!mounted) return;
       setUser(sessionUser);
       if (!sessionUser) { setProfile(null); setItems([]); setAuthReady(true); return; }
-      const { data, error } = await supabase.from('profiles').select('id,full_name,email,role').eq('id', sessionUser.id).maybeSingle();
+      const { data, error } = await client.from('profiles').select('id,full_name,email,role').eq('id', sessionUser.id).maybeSingle();
       if (!mounted) return;
       if (error) { setAuthError('We could not load your team permissions. Please try again or contact your administrator.'); setProfile(null); }
       else setProfile(data as TeamProfile | null);
       setAuthReady(true);
     };
-    supabase.auth.getSession().then(({ data, error }) => {
+    client.auth.getSession().then(({ data, error }) => {
       if (error) setAuthError('We could not restore your session. Please sign in again.');
       void loadProfile(data.session?.user ?? null);
     });
-    const { data: auth } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: auth } = client.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY') setAuthMode('new_password');
       queueMicrotask(() => { void loadProfile(session?.user ?? null); });
     });
