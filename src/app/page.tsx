@@ -68,25 +68,27 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!supabase || !user || !profile) { setItems([]); return; }
+    const client = supabase;
+    if (!client || !user || !profile) { setItems([]); return; }
     let active = true;
     const load = async () => {
-      const { data, error } = await supabase.from('inventory_items').select('*, suppliers(name)').order('expiry_date');
+      const { data, error } = await client.from('inventory_items').select('*, suppliers(name)').order('expiry_date');
       if (!active) return;
       if (error) { setDataError('Inventory could not be loaded. Check your access or ask an administrator.'); setItems([]); return; }
       setDataError('');
       setItems((data ?? []).map((row: any) => ({ ...row, supplier: row.suppliers?.name ?? '—' })));
     };
     void load();
-    const channel = supabase.channel(`inventory-live-${user.id}`).on('postgres_changes', { event:'*', schema:'public', table:'inventory_items' }, () => { void load(); }).subscribe();
-    return () => { active = false; void supabase.removeChannel(channel); };
+    const channel = client.channel(`inventory-live-${user.id}`).on('postgres_changes', { event:'*', schema:'public', table:'inventory_items' }, () => { void load(); }).subscribe();
+    return () => { active = false; void client.removeChannel(channel); };
   }, [user?.id, profile?.role]);
 
   useEffect(() => {
-    if (!supabase || active !== 'Team members' || profile?.role !== 'admin') return;
+    const client = supabase;
+    if (!client || active !== 'Team members' || profile?.role !== 'admin') return;
     let mounted = true;
     setTeamLoading(true);
-    supabase.from('profiles').select('id,full_name,email,role').order('created_at').then(({ data, error }) => {
+    client.from('profiles').select('id,full_name,email,role').order('created_at').then(({ data, error }) => {
       if (!mounted) return;
       setTeamLoading(false);
       if (error) { notify('Team list could not be loaded.'); return; }
