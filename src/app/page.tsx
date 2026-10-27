@@ -30,7 +30,7 @@ export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<TeamProfile | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const [authMode, setAuthMode] = useState<'sign_in'|'reset'|'new_password'>('sign_in');
+  const [authMode, setAuthMode] = useState<'sign_in'|'sign_up'|'reset'|'new_password'>('sign_in');
   const [authError, setAuthError] = useState('');
   const [authNotice, setAuthNotice] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
@@ -50,7 +50,7 @@ export default function Home() {
       if (!mounted) return;
       setUser(sessionUser);
       if (!sessionUser) { setProfile(null); setItems([]); setAuthReady(true); return; }
-      const { data, error } = await client.from('profiles').select('id,full_name,email,role').eq('id', sessionUser.id).maybeSingle();
+      const { data, error } = await client.from('profiles').select('id,full_name,email,role,is_active').eq('id', sessionUser.id).maybeSingle();
       if (!mounted) return;
       if (error) { setAuthError('We could not load your team permissions. Please try again or contact your administrator.'); setProfile(null); }
       else setProfile(data as TeamProfile | null);
@@ -88,7 +88,7 @@ export default function Home() {
     if (!client || active !== 'Team members' || profile?.role !== 'admin') return;
     let mounted = true;
     setTeamLoading(true);
-    client.from('profiles').select('id,full_name,email,role').order('created_at').then(({ data, error }) => {
+    client.from('profiles').select('id,full_name,email,role,is_active').order('created_at').then(({ data, error }) => {
       if (!mounted) return;
       setTeamLoading(false);
       if (error) { notify('Team list could not be loaded.'); return; }
@@ -202,6 +202,27 @@ export default function Home() {
     if (error) setAuthError('Email or password was not accepted. Check your details and try again.');
   }
 
+  async function signUp(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault(); setAuthError(''); setAuthNotice('');
+    if (!supabase) { setAuthError('Authentication is not configured for this deployment.'); return; }
+    const values = new FormData(e.currentTarget);
+    const password = String(values.get('password'));
+    if (password !== String(values.get('confirmPassword'))) { setAuthError('The passwords do not match.'); return; }
+    if (password.length < 10) { setAuthError('Use a password with at least 10 characters.'); return; }
+    setAuthBusy(true);
+    const { error } = await supabase.auth.signUp({
+      email:String(values.get('email')).trim(),
+      password,
+      options:{ data:{ full_name:String(values.get('full_name')).trim() }, emailRedirectTo:window.location.origin },
+    });
+    setAuthBusy(false);
+    if (error) setAuthError('Account creation failed. Try signing in or use password recovery if you already registered.');
+    else {
+      setAuthMode('sign_in');
+      setAuthNotice('Check your email to confirm your account. A workspace Admin must approve access before you can view inventory.');
+    }
+  }
+
   async function requestPasswordReset(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault(); setAuthError(''); setAuthNotice('');
     if (!supabase) return;
@@ -235,6 +256,14 @@ export default function Home() {
     notify('Team role updated');
   }
 
+  async function changeMemberAccess(id: string, is_active: boolean) {
+    if (!supabase || !isAdmin || id === user?.id) { notify('Only an Admin can change another member’s access.'); return; }
+    const { error } = await supabase.from('profiles').update({ is_active }).eq('id', id);
+    if (error) { notify('Access change was denied.'); return; }
+    setTeamMembers(current => current.map(member => member.id === id ? { ...member, is_active } : member));
+    notify(is_active ? 'Member approved' : 'Member access suspended');
+  }
+
   async function applyMarkdown(item: InventoryItem) {
     if (!supabase || !canManagePricing) { notify('Only admins and store managers can change prices.'); return; }
     const markdown = Math.round(item.price * 0.8 * 100) / 100;
@@ -247,8 +276,9 @@ export default function Home() {
   if (!authReady) return <main className="auth-shell"><section className="auth-card auth-loading"><div className="brand"><div className="brand-mark"><Leaf size={21}/></div><span>freshstock<span className="brand-dot">.</span></span></div><p>Checking your secure team session…</p></section></main>;
   if (!supabase) return <main className="auth-shell"><section className="auth-card"><div className="brand"><div className="brand-mark"><Leaf size={21}/></div><span>freshstock<span className="brand-dot">.</span></span></div><h1>Connect your workspace</h1><p>Supabase authentication is not configured for this deployment. Ask your administrator to add the project URL and publishable key in Render.</p></section></main>;
   if (authMode === 'new_password' && user) return <main className="auth-shell"><section className="auth-card"><div className="brand"><div className="brand-mark"><Leaf size={21}/></div><span>freshstock<span className="brand-dot">.</span></span></div><span className="auth-kicker">ACCOUNT SECURITY</span><h1>Choose a new password</h1><p>Use at least 10 characters for your FreshStock account.</p><form className="auth-form" onSubmit={updatePassword}><label>New password<input name="password" type="password" autoComplete="new-password" minLength={10} required/></label><label>Confirm password<input name="confirmPassword" type="password" autoComplete="new-password" minLength={10} required/></label>{authError&&<div className="auth-message error" role="alert">{authError}</div>}<button className="button button-primary" disabled={authBusy}>{authBusy?'Updating…':'Update password'}</button></form></section></main>;
-  if (!user) return <main className="auth-shell"><section className="auth-card"><div className="brand"><div className="brand-mark"><Leaf size={21}/></div><span>freshstock<span className="brand-dot">.</span></span></div><span className="auth-kicker">TEAM INVENTORY WORKSPACE</span><h1>{authMode === 'reset' ? 'Reset your password' : 'Welcome back'}</h1><p>{authMode === 'reset' ? 'Enter your team email and we’ll send a secure reset link.' : 'Sign in with the email and password from your team invitation.'}</p>{authError&&<div className="auth-message error" role="alert">{authError}</div>}{authNotice&&<div className="auth-message success" role="status">{authNotice}</div>}{authMode === 'reset' ? <form className="auth-form" onSubmit={requestPasswordReset}><label>Work email<input name="email" type="email" autoComplete="email" required placeholder="you@store.com"/></label><button className="button button-primary" disabled={authBusy}>{authBusy?'Sending…':'Send reset link'}</button><button type="button" className="auth-link" onClick={()=>{setAuthMode('sign_in');setAuthError('');setAuthNotice('')}}>Back to sign in</button></form> : <form className="auth-form" onSubmit={signIn}><label>Work email<input name="email" type="email" autoComplete="username" required placeholder="you@store.com"/></label><label>Password<input name="password" type="password" autoComplete="current-password" required placeholder="Your password"/></label><button className="button button-primary" disabled={authBusy}>{authBusy?'Signing in…':'Sign in'}</button><button type="button" className="auth-link" onClick={()=>{setAuthMode('reset');setAuthError('');setAuthNotice('')}}>Forgot password?</button><div className="auth-invite-note"><ShieldCheck size={15}/><span>Accounts are invitation-only. Ask your workspace admin to invite your email through Supabase Auth.</span></div></form>}</section></main>;
+  if (!user) return <main className="auth-shell"><section className="auth-card"><div className="brand"><div className="brand-mark"><Leaf size={21}/></div><span>freshstock<span className="brand-dot">.</span></span></div><span className="auth-kicker">TEAM INVENTORY WORKSPACE</span><h1>{authMode === 'reset' ? 'Reset your password' : authMode === 'sign_up' ? 'Create your account' : 'Welcome back'}</h1><p>{authMode === 'reset' ? 'Enter your email and we’ll send a secure reset link.' : authMode === 'sign_up' ? 'Create a team account to get started.' : 'Sign in to your FreshStock workspace.'}</p>{authError&&<div className="auth-message error" role="alert">{authError}</div>}{authNotice&&<div className="auth-message success" role="status">{authNotice}</div>}{authMode === 'reset' ? <form className="auth-form" onSubmit={requestPasswordReset}><label>Work email<input name="email" type="email" autoComplete="email" required placeholder="you@store.com"/></label><button className="button button-primary" disabled={authBusy}>{authBusy?'Sending…':'Send reset link'}</button><button type="button" className="auth-link" onClick={()=>{setAuthMode('sign_in');setAuthError('');setAuthNotice('')}}>Back to sign in</button></form> : authMode === 'sign_up' ? <form className="auth-form" onSubmit={signUp}><label>Your name<input name="full_name" type="text" autoComplete="name" required placeholder="Alex Morgan"/></label><label>Work email<input name="email" type="email" autoComplete="email" required placeholder="you@store.com"/></label><label>Password<input name="password" type="password" autoComplete="new-password" minLength={10} required placeholder="At least 10 characters"/></label><label>Confirm password<input name="confirmPassword" type="password" autoComplete="new-password" minLength={10} required placeholder="Enter your password again"/></label><button className="button button-primary" disabled={authBusy}>{authBusy?'Creating account…':'Create account'}</button><div className="auth-invite-note"><ShieldCheck size={15}/><span>New accounts start as Warehouse Staff and need Admin approval. You cannot choose or grant your own role.</span></div><button type="button" className="auth-link" onClick={()=>{setAuthMode('sign_in');setAuthError('');setAuthNotice('')}}>Already registered? Sign in</button></form> : <form className="auth-form" onSubmit={signIn}><label>Work email<input name="email" type="email" autoComplete="username" required placeholder="you@store.com"/></label><label>Password<input name="password" type="password" autoComplete="current-password" required placeholder="Your password"/></label><button className="button button-primary" disabled={authBusy}>{authBusy?'Signing in…':'Sign in'}</button><button type="button" className="auth-link" onClick={()=>{setAuthMode('reset');setAuthError('');setAuthNotice('')}}>Forgot password?</button><button type="button" className="auth-link" onClick={()=>{setAuthMode('sign_up');setAuthError('');setAuthNotice('')}}>Create an account</button></form>}</section></main>;
   if (!profile) return <main className="auth-shell"><section className="auth-card"><div className="brand"><div className="brand-mark"><Leaf size={21}/></div><span>freshstock<span className="brand-dot">.</span></span></div><h1>Team access is not ready</h1><p>{authError || 'This account does not have a FreshStock team profile yet. Ask an administrator to invite you.'}</p><button className="button button-secondary" onClick={()=>void supabase?.auth.signOut()}><LogOut size={15}/> Sign out</button></section></main>;
+  if (!profile.is_active) return <main className="auth-shell"><section className="auth-card"><div className="brand"><div className="brand-mark"><Leaf size={21}/></div><span>freshstock<span className="brand-dot">.</span></span></div><span className="auth-kicker">ACCOUNT CREATED</span><h1>Waiting for approval</h1><p>Your account is set up as {roleLabels[profile.role]}. A workspace Admin must approve access before inventory becomes available.</p><button className="button button-secondary" onClick={()=>void supabase?.auth.signOut()}><LogOut size={15}/> Sign out</button></section></main>;
 
   return <main className="app-shell">
     <aside className={`sidebar ${mobileNav?'mobile-open':''}`}>
@@ -265,7 +295,7 @@ export default function Home() {
     <section className="main-area">
       <header className="topbar"><button className="icon-button menu-toggle" onClick={()=>setMobileNav(!mobileNav)} aria-label="Toggle navigation"><Menu size={19}/></button><div className="breadcrumb">Workspace <span>/</span> <b>{active}</b></div><div className="top-actions"><div className="sync-pill"><span className="live-dot"/> Live sync</div><button className="icon-button notification-button" aria-label="Notifications" onClick={()=>notify('You’re all caught up')}><Bell size={18}/><i/></button><div className="top-divider"/><button className="top-user" onClick={()=>void supabase?.auth.signOut()}><div className="profile-avatar">{(profile.full_name || user.email || 'FS').slice(0,2).toUpperCase()}</div><span>{profile.full_name || user.email}</span><span className="role-chip">{roleLabels[profile.role]}</span><ChevronDown size={14}/></button></div></header>
       <div className="content">
-        {active === 'Team members' ? <section className="team-panel"><div className="panel-heading"><div><div className="panel-title-row"><h2>Team members</h2><span className="total-chip">{teamMembers.length} accounts</span></div><p>Roles control what each person can view and change.</p></div></div>{isAdmin ? <><div className="team-admin-note"><ShieldCheck size={16}/><span>Invite accounts in Supabase Auth. New accounts start as Warehouse Staff.</span><a href="https://supabase.com/dashboard/project/eyndywxiqmrafdayzsco/auth/users" target="_blank" rel="noreferrer">Open user invites <ArrowUpRight size={13}/></a></div><div className="team-list"><div className="team-row team-header"><span>TEAM MEMBER</span><span>ACCESS ROLE</span></div>{teamLoading ? <div className="team-empty">Loading team members…</div> : teamMembers.length ? teamMembers.map(member=><div className="team-row" key={member.id}><div className="team-identity"><div className="profile-avatar">{(member.full_name || member.email || 'FS').slice(0,2).toUpperCase()}</div><div><b>{member.full_name || 'Team member'}</b><small>{member.email}</small></div></div><label className="team-role-select"><span className="sr-only">Role for {member.email}</span><select value={member.role} disabled={member.id===user.id} onChange={e=>void changeTeamRole(member.id,e.target.value as TeamRole)}><option value="admin">Admin</option><option value="store_manager">Store Manager</option><option value="warehouse_staff">Warehouse Staff</option></select>{member.id===user.id&&<small>Your role</small>}</label></div>) : <div className="team-empty">No team members yet.</div>}</div></> : <div className="team-empty permission-empty"><ShieldCheck size={20}/><b>Admin access required</b><span>Only admins can view the team list or change roles.</span></div>}</section> : <>
+        {active === 'Team members' ? <section className="team-panel"><div className="panel-heading"><div><div className="panel-title-row"><h2>Team members</h2><span className="total-chip">{teamMembers.length} accounts</span></div><p>Approve accounts and choose what each person can view or change.</p></div></div>{isAdmin ? <><div className="team-admin-note"><ShieldCheck size={16}/><span>New sign-ups are private until you approve them. Their roles start as Warehouse Staff.</span></div><div className="team-list"><div className="team-row team-header"><span>TEAM MEMBER</span><span>ROLE &amp; ACCESS</span></div>{teamLoading ? <div className="team-empty">Loading team members…</div> : teamMembers.length ? teamMembers.map(member=><div className="team-row" key={member.id}><div className="team-identity"><div className="profile-avatar">{(member.full_name || member.email || 'FS').slice(0,2).toUpperCase()}</div><div><b>{member.full_name || 'Team member'}</b><small>{member.email}</small></div></div><div className="team-controls"><label className="team-role-select"><span className="sr-only">Role for {member.email}</span><select value={member.role} disabled={member.id===user.id} onChange={e=>void changeTeamRole(member.id,e.target.value as TeamRole)}><option value="admin">Admin</option><option value="store_manager">Store Manager</option><option value="warehouse_staff">Warehouse Staff</option></select></label><button className={`member-access ${member.is_active?'approved':''}`} disabled={member.id===user.id} onClick={()=>void changeMemberAccess(member.id,!member.is_active)}>{member.id===user.id?'You':member.is_active?'Active':'Approve'}</button></div></div>) : <div className="team-empty">No team members yet.</div>}</div></> : <div className="team-empty permission-empty"><ShieldCheck size={20}/><b>Admin access required</b><span>Only admins can view the team list or change roles.</span></div>}</section> : <>
         <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-icon"><Sparkles size={13}/></span> {dateLabel}</div><h1>Good morning, {profile.full_name || user.email?.split('@')[0] || 'there'} <span>☀️</span></h1><p>Here’s what’s happening across your inventory today.</p></div><div className="heading-actions"><button className="button button-secondary" onClick={()=>setDialog('import')}><Upload size={16}/> Import</button><button className="button button-primary" onClick={()=>setDialog('add')}><Plus size={17}/> Add item</button></div></div>
 
         <div className="metrics-grid">

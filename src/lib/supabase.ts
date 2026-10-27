@@ -8,7 +8,7 @@ export const supabase = url && key ? createClient(url, key, {
 }) : null;
 
 export type TeamRole = 'admin' | 'warehouse_staff' | 'store_manager';
-export type TeamProfile = { id: string; full_name: string; email: string; role: TeamRole };
+export type TeamProfile = { id: string; full_name: string; email: string; role: TeamRole; is_active: boolean };
 export type { User };
 
 export type InventoryItem = {
