@@ -5,11 +5,11 @@ A real-time inventory dashboard for retail stores and small warehouses, built wi
 ## Start locally
 
 1. Install dependencies with `npm install`.
-2. Copy `.env.example` to `.env.local` and add your Supabase project URL and anon key.
-3. Run the SQL in `supabase/migrations/202610270001_inventory.sql` in the Supabase SQL editor (or apply it with the Supabase CLI).
+2. Copy `.env.example` to `.env.local` and add your Supabase project URL and publishable key.
+3. Apply the SQL migrations in `supabase/migrations` in filename order.
 4. Run `npm run dev` and open `http://localhost:3000`.
 
-The dashboard renders with sample data when Supabase credentials are not configured. Once connected, it reads `inventory_items`, subscribes to Supabase Realtime changes and supports authenticated inserts. The app uses the Supabase anon key only; database access is protected by RLS.
+The app is invitation-only. It reads inventory only after a team member signs in, subscribes to Supabase Realtime, and never writes inventory to local demo state. The app uses a publishable key only; database access is protected by RLS and role checks.
 
 ## Import / export
 
@@ -17,4 +17,14 @@ Excel imports expect a header row containing `sku`, `name`, `category`, `supplie
 
 ## Roles
 
-Roles are `admin`, `warehouse_staff` and `store_manager`. New Auth users automatically receive a profile with the `warehouse_staff` role. Assign elevated roles by updating `public.profiles.role` in the Supabase dashboard. RLS grants team read and inventory write access; only managers/admins can delete inventory, and admins can view audit logs/manage team profiles.
+Roles are `admin`, `warehouse_staff` and `store_manager`. Team accounts are invited through Supabase Auth; new users start as `warehouse_staff` and can reset their passwords from the sign-in page. Warehouse Staff can receive inventory and update counts and batch dates, Store Managers can manage suppliers and markdown pricing, and Admins can change team roles and view audit logs. RLS and database triggers enforce these permissions even when requests bypass the UI.
+
+### First admin setup
+
+There are no starter credentials. Invite your email from the Supabase project’s **Authentication → Users** page, then promote that account once in the Supabase SQL editor:
+
+```sql
+update public.profiles set role = 'admin' where email = 'your-email@example.com';
+```
+
+After that, sign in at FreshStock and manage additional roles from **Team members**. Replace the email with the invited account’s address.
